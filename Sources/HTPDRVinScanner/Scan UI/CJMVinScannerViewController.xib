@@ -13,6 +13,7 @@
                 <outlet property="cancelButton" destination="qNU-3Y-h2J" id="RPH-ex-1HG"/>
                 <outlet property="lightSwitch" destination="wml-K8-cPB" id="eEM-va-MOp"/>
                 <outlet property="lightSwitchStack" destination="CiQ-fY-VYw" id="LDN-NK-tlf"/>
+                <outlet property="scanLine" destination="HYQ-8n-KFZ" id="sVX-ci-am7"/>
                 <outlet property="view" destination="8Ly-Kr-opK" id="A0n-kw-HYO"/>
                 <outlet property="vinScannerView" destination="YSO-w6-Ozc" id="una-KK-7Xz"/>
             </connections>

@@ -37,6 +37,8 @@ open class CJMVinScannerViewController: UIViewController {
     /// Cancel button, calls on delegate to dismiss the scene.
     @IBOutlet private weak var cancelButton: UIButton!
     
+    @IBOutlet private weak var scanLine: UIView!
+    
     public weak var delegate: VinScanControllerDelegate?
     
     private lazy var vinScanManager: CJMVinScanManager = {
@@ -60,6 +62,7 @@ open class CJMVinScannerViewController: UIViewController {
         super.viewDidLoad()
 
         cancelButton.setTitle("Cancel", for: .normal)
+        scanLine.isHidden = true
         setupLightSwitch()
         vinScanManager.checkPermissions()
         setupViewPort()
