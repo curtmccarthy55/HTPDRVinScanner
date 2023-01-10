@@ -9,6 +9,7 @@ import Foundation
 import AVFoundation
 import Vision
 
+/// Delegate methods to receive results of a VIN scan session, either success, failure, or denial of permission.
 protocol VinScanManagerDelegate: AnyObject {
     /// Some technology needed by the VIN scanner has been disabled (i.e. camera access).
     func vinScanPermissionDenied()
@@ -20,6 +21,7 @@ protocol VinScanManagerDelegate: AnyObject {
     func vinScanUnavailable()
 }
 
+/// A type responsible for overseeing the VIN scan session.  Manages permission and presentation of the camera/AVCaptureSession, handling VIN code detection and parsing, and returning results back to a VinScanManagerDelegate.
 class CJMVinScanManager: NSObject { // NSObject inheritance required for conformance to AVCaptureVideoDataOutputSampleBufferDelegate.
     weak var delegate: VinScanManagerDelegate?
     
