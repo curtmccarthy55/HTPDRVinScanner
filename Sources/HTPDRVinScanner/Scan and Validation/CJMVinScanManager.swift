@@ -91,8 +91,11 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
 //        vinScanLayer.session = captureSession
         view.layer.session = captureSession // *** connection required here.
         
-        // Start the capture session.
-        captureSession.startRunning()
+        // Start the capture session.  Shouldn't be called on main.
+        DispatchQueue.global().async { [weak self] in
+            guard let weakSelf = self else { return }
+            weakSelf.captureSession.startRunning()
+        }
     }
     
     //MARK: - AV and Vision Handling
