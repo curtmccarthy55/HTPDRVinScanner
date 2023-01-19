@@ -8,6 +8,7 @@
 import Foundation
 import AVFoundation
 import Vision
+import CoreImage
 
 /// Delegate methods to receive results of a VIN scan session, either success, failure, or denial of permission.
 protocol VinScanManagerDelegate: AnyObject {
@@ -25,23 +26,22 @@ protocol VinScanManagerDelegate: AnyObject {
 class CJMVinScanManager: NSObject { // NSObject inheritance required for conformance to AVCaptureVideoDataOutputSampleBufferDelegate.
     weak var delegate: VinScanManagerDelegate?
     
+    /// The number of images that have been sent to VNDetectBarcodesRequest (every other image will have it's colors inverted).
+    private var imageCount = 0
+    
+    private lazy var imageConverter = CJMImageConverter()
+    
     /// AVCaptureSession instance.
     private var captureSession = AVCaptureSession()
     
     /// A VNRequest to detect barcodes.
-    private lazy var detectBarcodeRequest = VNDetectBarcodesRequest { [unowned self] request, error in
+    private lazy var detectBarcodeRequest = VNDetectBarcodesRequest(completionHandler: { [unowned self] (request, error) in
         if let error = error {
             delegate?.vinScanFailed(with: error)
             return
         }
-//        guard error == nil else {
-//            showAlert(withTitle: "Barcode Error",
-//                           message: error!.localizedDescription)
-//            return
-//        }
-        
         processClassification(request)
-    }
+    })
     
     /// Boolean indicating if further scan processing should be stopped.
     private var blockAdditionalScans = false
@@ -55,50 +55,6 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
     deinit {
         captureSession.stopRunning()
     }
-    
-    func connectViewPort(_ view: CJMVinScannerView) {
-        // *** Modify capture session ***
-        captureSession.sessionPreset = .hd1280x720
-        
-        // *** Add input ***
-        // Find the default wide angle camera, located on the rear of the iPhone.
-        let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera,
-                                                  for: .video,
-                                                  position: .back)
-        
-        // Make sure your app can use the camera as an input device for the capture session.
-        guard let device = videoDevice,
-              let videoDeviceInput = try? AVCaptureDeviceInput(device: device),
-              captureSession.canAddInput(videoDeviceInput) else {
-                  // If there's a problem with the camera, show an alert.
-            delegate?.vinScanUnavailable()
-                  return
-              }
-        
-        // Otherwise, set the rear wide angle camera as the input device for the capture session.
-        captureSession.addInput(videoDeviceInput)
-        
-        // *** Create and add output ***
-        let captureOutput = AVCaptureVideoDataOutput()
-        // Set sample rate.
-        captureOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)]
-        captureOutput.setSampleBufferDelegate(self,
-                                              queue: DispatchQueue.global(qos: DispatchQoS.QoSClass.default))
-        captureSession.addOutput(captureOutput)
-        
-        // Set the AVCaptureSession on our camera view.
-//        let vinScanLayer = vinScannerView.layer as! AVCaptureVideoPreviewLayer
-//        vinScanLayer.session = captureSession
-        view.layer.session = captureSession // *** connection required here.
-        
-        // Start the capture session.  Shouldn't be called on main.
-        DispatchQueue.global().async { [weak self] in
-            guard let weakSelf = self else { return }
-            weakSelf.captureSession.startRunning()
-        }
-    }
-    
-    //MARK: - AV and Vision Handling
     
     /// Check camera permission.
     func checkPermissions() {
@@ -119,6 +75,51 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
             return
         }
     }
+    
+    /// Sets up the AVCaptureSession, AVCaptureDeviceInput and AVCaptureOutput,
+    // func connectVisionCamera(_ previewView: CJMVinScannerView) {
+    func connectViewPort(_ view: CJMVinScannerView) {
+        // *** Modify capture session ***
+        captureSession.sessionPreset = .hd1280x720
+        
+        // *** Add input ***
+        // Find the default wide angle camera, located on the rear of the iPhone.
+        let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera,
+                                                  for: .video,
+                                                  position: .back)
+        
+        // Make sure your app can use the camera as an input device for the capture session.
+        guard let device = videoDevice,
+              let videoDeviceInput = try? AVCaptureDeviceInput(device: device),
+              captureSession.canAddInput(videoDeviceInput) else {
+                // If there's a problem with the camera, show an alert.
+                delegate?.vinScanUnavailable()
+                return
+        }
+        
+        // Add the wide angle camera's input (data feed) as the session input.
+        captureSession.addInput(videoDeviceInput)
+        
+        // *** Create and add output ***
+        let captureOutput = AVCaptureVideoDataOutput()
+        captureOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)]
+        captureOutput.setSampleBufferDelegate(self,
+                                              queue: DispatchQueue.global(qos: DispatchQoS.QoSClass.default))
+        captureSession.addOutput(captureOutput)
+        
+        // Set the AVCaptureSession on our camera view.
+//        let vinScanLayer = vinScannerView.layer as! AVCaptureVideoPreviewLayer
+//        vinScanLayer.session = captureSession
+        view.layer.session = captureSession // *** connection required here.
+        
+        // Start the capture session.  Shouldn't be called on main.
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let weakSelf = self else { return }
+            weakSelf.captureSession.startRunning()
+        }
+    }
+    
+    //MARK: - AV and Vision Handling
     
     /// Handle a new VNRequest.
     private func processClassification(_ request: VNRequest) {
@@ -170,22 +171,110 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CJMVinScanManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+    
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // Get an image out of sample buffer, like a page out of a flip book.
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+        // Get a CIIimage from the sample buffer.
+        guard let ciImage = imageConverter.convertSampleBuffer(sampleBuffer) else {
             return
         }
-        
-        // Make a new VNImageRequestHandler using that image. TODO make sure .right is the orientation we want here.
-        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+
+        // Every other image, invert the colors before attempting barcode detection.
+        let finalImage: CIImage
+        if imageCount % 2 == 0 {
+            #if DEBUG
+            print("*** Using normal image ***")
+            #endif
+            finalImage = ciImage
+        }
+        else {
+            if let invertedImage = imageConverter.invertImage(ciImage) {
+                #if DEBUG
+                print("*** Using inverted image ***")
+                #endif
+                finalImage = invertedImage
+            }
+            else {
+                #if DEBUG
+                print("*** Falling back to normal image after invert image fail ***")
+                #endif
+                finalImage = ciImage
+            }
+        }
+        imageCount += 1
+
+        // Make a new VNImageRequestHandler using that image.
+        // TODO make sure .right is the orientation we want here.
+        let imageRequestHandler = VNImageRequestHandler(ciImage: finalImage,
                                                         orientation: .right,
                                                         options: [:])
-        
+
         // Perform the detectBarcodeRequest using the handler.
         do {
             try imageRequestHandler.perform([detectBarcodeRequest])
-        } catch {
+            print("*** Performing new detect barcodes request on CIImage. ***")
+        }
+        catch {
             print(error)
         }
+    }
+    
+//    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+//        // Get an image out of sample buffer, like a page out of a flip book.
+//        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+//            return
+//        }
+//
+//        // Make a new VNImageRequestHandler using that image.
+//        // TODO make sure .right is the orientation we want here.
+//        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+//                                                        orientation: .right,
+//                                                        options: [:])
+////        let newImageRequestHandler = VNImageRequestHandler(...)
+//
+//        // Perform the detectBarcodeRequest using the handler.
+//        do {
+//            try imageRequestHandler.perform([detectBarcodeRequest])
+//            print("Performing detect barcodes request on image...")
+//        } catch {
+//            print(error)
+//        }
+//    }
+}
+
+/// A type to handle converting image types and applying filters.
+fileprivate final class CJMImageConverter {
+    /// A CIFilter to invert colors in the image.
+    private lazy var colorInvert: CIFilter? = CIFilter(name: "CIColorInvert")
+    
+    /// A method to invert the colors of a given image.
+    /// - Parameter sampleImage: Some sample image (image type pending... at the moment, either a CMSampleBuffer or CVPixelBuffer, but this will depend on optimization)
+    /// - Returns: The inverted image (again, image type pending... the image that gets returned will need to be passed to a VNImageRequestHandler, and that can technically consume image data in a number of formats - CGImage, CIImage, CVPixelBuffer, CMSampleBuffer, Data, and URL (i.e. presumably a path to some image))
+    func invertImage(_ sampleImage: CIImage) -> CIImage? {
+//        guard let filter = CIFilter(name: "CIColorInvert") else {
+//            return nil
+//        }
+//        filter.setValue(sampleImage,
+//                        forKey: kCIInputImageKey)
+//        let invertedImage = filter.outputImage
+        
+        guard colorInvert != nil else {
+            return nil
+        }
+        colorInvert?.setValue(sampleImage,
+                         forKey: kCIInputImageKey)
+        let invertedImage = colorInvert?.outputImage
+        
+        return invertedImage
+    }
+    
+    /// Converts a CMSampleBuffer to a CIImage.
+    /// - Parameter sampleBuffer: A CMSampleBuffer.
+    /// - Returns: A CIImage, if one was able to be generated from the given CMSampleBuffer.
+    func convertSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CIImage? {
+        guard let cvImageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return nil
+        }
+        let ciImage = CIImage(cvPixelBuffer: cvImageBuffer)
+        return ciImage
     }
 }
