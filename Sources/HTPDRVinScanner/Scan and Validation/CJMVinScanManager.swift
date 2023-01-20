@@ -10,6 +10,8 @@ import AVFoundation
 import Vision
 import CoreImage
 
+// MARK: - VinScanManagerDelegate
+
 /// Delegate methods to receive results of a VIN scan session, either success, failure, or denial of permission.
 protocol VinScanManagerDelegate: AnyObject {
     /// Some technology needed by the VIN scanner has been disabled (i.e. camera access).
@@ -22,18 +24,44 @@ protocol VinScanManagerDelegate: AnyObject {
     func vinScanUnavailable()
 }
 
+// MARK: - CJMVinScanManager
+
 /// A type responsible for overseeing the VIN scan session.  Manages permission and presentation of the camera/AVCaptureSession, handling VIN code detection and parsing, and returning results back to a VinScanManagerDelegate.
-class CJMVinScanManager: NSObject { // NSObject inheritance required for conformance to AVCaptureVideoDataOutputSampleBufferDelegate.
+class CJMVinScanManager: NSObject { // NSObject required for AVCaptureVideoDataOutputSampleBufferDelegate.
+    /// Delegate to receive results of VIN scan session.
     weak var delegate: VinScanManagerDelegate?
     
-    /// The number of images that have been sent to VNDetectBarcodesRequest (every other image will have it's colors inverted).
-    private var imageCount = 0
     
-    private lazy var imageConverter = CJMImageConverter()
+    // MARK: - AVCaptureSession Properties
     
     /// AVCaptureSession instance.
     private var captureSession = AVCaptureSession()
     
+    // MARK: - VideoDeviceInput Properties
+    
+    /// The current video device input for the capture session.
+    private(set) var videoDeviceInput: AVCaptureDeviceInput?
+    
+    /// The current video device input's maximum zoom factor (1.0 indicates that the format isn't capable of zooming).
+    var videoMaxZoomFactor: Float {
+        if let device = videoDeviceInput?.device {
+            // Per Apple AVCamBarcode project recommendations, a cap of 8.0 is applied.
+            return Float(min((device.activeFormat.videoMaxZoomFactor), CGFloat(8.0)))
+        }
+
+        return 1.0
+    }
+    
+    /// The current zoom factor of the video device input.  Allowed values range from 1.0 (full field of view) to the value of the active format’s videoMaxZoomFactor property.
+    var videoZoomFactor: Float {
+        if let device = videoDeviceInput?.device {
+            return Float(device.videoZoomFactor)
+        }
+        
+        return 1.0
+    }
+    
+    // MARK: - Vision Properties
     /// A VNRequest to detect barcodes.
     private lazy var detectBarcodeRequest = VNDetectBarcodesRequest(completionHandler: { [unowned self] (request, error) in
         if let error = error {
@@ -46,6 +74,13 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
     /// Boolean indicating if further scan processing should be stopped.
     private var blockAdditionalScans = false
     
+    /* Image Altering Properties */
+    /// The number of images that have been sent to VNDetectBarcodesRequest (every other image will have it's colors inverted).
+    private var imageCount = 0
+    
+    /// Image converter to convert between image data types and apply filters.
+    private lazy var imageConverter = CJMImageConverter()
+    
     // MARK: - Set Up & Tear Down
     
     init(delegate: VinScanManagerDelegate) {
@@ -55,6 +90,8 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
     deinit {
         captureSession.stopRunning()
     }
+    
+    // MARK: - Camera Handling
     
     /// Check camera permission.
     func checkPermissions() {
@@ -98,6 +135,7 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
         }
         
         // Add the wide angle camera's input (data feed) as the session input.
+        self.videoDeviceInput = videoDeviceInput
         captureSession.addInput(videoDeviceInput)
         
         // *** Create and add output ***
@@ -116,6 +154,20 @@ class CJMVinScanManager: NSObject { // NSObject inheritance required for conform
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let weakSelf = self else { return }
             weakSelf.captureSession.startRunning()
+        }
+    }
+    
+    /// Attempts to update the video zoom factor to the given magnification.
+    func zoomCamera(magnification: Float) {
+        do {
+            try videoDeviceInput?.device.lockForConfiguration()
+            videoDeviceInput?.device.videoZoomFactor = CGFloat(magnification)
+            videoDeviceInput?.device.unlockForConfiguration()
+        }
+        catch {
+            #if DEBUG
+            print("Could not lock for configuration: \(error)")
+            #endif
         }
     }
     

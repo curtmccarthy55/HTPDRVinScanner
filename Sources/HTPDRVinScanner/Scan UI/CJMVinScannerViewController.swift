@@ -22,8 +22,18 @@ public protocol VinScanControllerDelegate: AnyObject {
 
 // MARK: - CJMVinScannerViewController
 
-/// VIN Scanner View Controller.  Scans QR and Barcodes.
+/// ViewController for the VIN scanner UI.
 open class CJMVinScannerViewController: UIViewController {
+    
+    // MARK: Properties
+    public weak var delegate: VinScanControllerDelegate?
+    
+    private lazy var vinScanManager: CJMVinScanManager = {
+        let manager = CJMVinScanManager(delegate: self)
+        return manager
+    }()
+    
+    // MARK: Outlet Properties
     
     /// The viewport for the VIN scanner.
     @IBOutlet private weak var vinScannerView: CJMVinScannerView!
@@ -31,20 +41,17 @@ open class CJMVinScannerViewController: UIViewController {
     /// UISwitch controlling the torch.
     @IBOutlet private weak var lightSwitch: UISwitch!
     
+    /// Zoom control slider.
+    @IBOutlet weak var zoomSlider: UISlider!
+    
     /// Horizontal stack view for the light switch and associated labels.
     @IBOutlet private weak var lightSwitchStack: UIStackView!
     
     /// Cancel button, calls on delegate to dismiss the scene.
     @IBOutlet private weak var cancelButton: UIButton!
     
+    /// A decorative thin, red, transparent "scan" line.  Centered horizontally and spans the width of the viewport.
     @IBOutlet private weak var scanLine: UIView!
-    
-    public weak var delegate: VinScanControllerDelegate?
-    
-    private lazy var vinScanManager: CJMVinScanManager = {
-        let manager = CJMVinScanManager(delegate: self)
-        return manager
-    }()
     
     //MARK: - Scene Set Up
     
@@ -66,12 +73,26 @@ open class CJMVinScannerViewController: UIViewController {
         setupLightSwitch()
         vinScanManager.checkPermissions()
         setupViewPort()
+        setupZoomSlider()
     }
     
     public override func viewDidLayoutSubviews() {
       super.viewDidLayoutSubviews()
       
       correctVideoOrientation()
+    }
+    
+    private func setupZoomSlider() {
+        zoomSlider.maximumValue = vinScanManager.videoMaxZoomFactor
+        zoomSlider.minimumValue = 1.0
+        zoomSlider.value = vinScanManager.videoZoomFactor
+    }
+    
+    @IBAction private func zoomCamera(with zoomSlider: UISlider) {
+        #if DEBUG
+        print("Attempting zoom to \(zoomSlider.value)")
+        #endif
+        vinScanManager.zoomCamera(magnification: zoomSlider.value)
     }
     
     /// Checks for torch access and sets up the light switch stack state and connections accordingly.
@@ -172,7 +193,11 @@ open class CJMVinScannerViewController: UIViewController {
     
     // MARK: - Error Handling
     
-    private func showAlert(withTitle title: String, message: String) {
+    /// Convenience method to create and present an alert with the given title, message, and an "OK" dismissal action.
+    /// - Parameters:
+    ///    - title: The alert title.
+    ///    - message the alert message.
+    private func showAlert(withTitle title: String?, message: String?) {
         DispatchQueue.main.async {
             let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
             alertController.addAction(UIAlertAction(title: "OK", style: .default))
