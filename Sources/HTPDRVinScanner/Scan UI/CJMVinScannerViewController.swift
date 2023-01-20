@@ -38,6 +38,9 @@ open class CJMVinScannerViewController: UIViewController {
     /// The viewport for the VIN scanner.
     @IBOutlet private weak var vinScannerView: CJMVinScannerView!
     
+    /// Visual supplement.  Provides black background prior to the camera becoming active.  Prevents underlying UI from showing through during VIN scanner presentation.
+    @IBOutlet private weak var shutterView: UIView?
+    
     /// UISwitch controlling the torch.
     @IBOutlet private weak var lightSwitch: UISwitch!
     
@@ -82,10 +85,22 @@ open class CJMVinScannerViewController: UIViewController {
       correctVideoOrientation()
     }
     
+    override open func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        shutterView?.removeFromSuperview()
+    }
+    
+    /// Sets min, max, and initial zoom values on the zoom slider.
     private func setupZoomSlider() {
         zoomSlider.maximumValue = vinScanManager.videoMaxZoomFactor
         zoomSlider.minimumValue = 1.0
         zoomSlider.value = vinScanManager.videoZoomFactor
+        #if DEBUG
+        print("zoomSlider.minimumValue == \(zoomSlider.minimumValue)")
+        print("zoomSlider.maximumValue == \(zoomSlider.maximumValue)")
+        print("zoomSlider.value == \(zoomSlider.value)")
+        #endif
     }
     
     @IBAction private func zoomCamera(with zoomSlider: UISlider) {

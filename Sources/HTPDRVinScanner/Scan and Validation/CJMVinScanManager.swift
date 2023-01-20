@@ -46,7 +46,8 @@ class CJMVinScanManager: NSObject { // NSObject required for AVCaptureVideoDataO
     var videoMaxZoomFactor: Float {
         if let device = videoDeviceInput?.device {
             // Per Apple AVCamBarcode project recommendations, a cap of 8.0 is applied.
-            return Float(min((device.activeFormat.videoMaxZoomFactor), CGFloat(8.0)))
+            let deviceMaxZoomFactor = device.activeFormat.videoMaxZoomFactor
+            return Float(min((deviceMaxZoomFactor), CGFloat(8.0)))
         }
 
         return 1.0
@@ -54,7 +55,7 @@ class CJMVinScanManager: NSObject { // NSObject required for AVCaptureVideoDataO
     
     /// The current zoom factor of the video device input.  Allowed values range from 1.0 (full field of view) to the value of the active format’s videoMaxZoomFactor property.
     var videoZoomFactor: Float {
-        if let device = videoDeviceInput?.device {
+        if let device = videoDeviceInput?.device  {
             return Float(device.videoZoomFactor)
         }
         
